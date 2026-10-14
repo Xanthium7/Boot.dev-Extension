@@ -1,34 +1,15 @@
 package main
 
-import "fmt"
-
-func printReports(intro, body, outro string) {
-	
-	printCostReport( func (string) int {
-		return 2 * len(intro)
-	}, intro )
-
-	printCostReport(func (string) int {
-		return 3 * len(body)
-	}, body )
-
-	printCostReport( func (string) int {
-		return 4 * len(outro)
-	}, outro)
-}
-
-// don't touch below this line
-
-func main() {
-	printReports(
-		"Welcome to the Hotel California",
-		"Such a lovely place",
-		"Plenty of room at the Hotel California",
-	)
-}
-
-func printCostReport(costCalculator func(string) int, message string) {
-	cost := costCalculator(message)
-	fmt.Printf(`Message: "%s" Cost: %v cents`, message, cost)
-	fmt.Println()
+func splitEmail(email string) (string, string) {
+	{
+		username, domain := "", ""
+	}
+	for i, r := range email {
+		if r == '@' {
+			username = email[:i]
+			domain = email[i+1:]
+			break
+		}
+	}
+	return username, domain
 }

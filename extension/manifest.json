@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Boot.dev -> LearnGo Sync",
-  "version": "1.0.1",
+  "version": "1.0.4",
   "description": "One-click export of main.go and main_test.go from Boot.dev into your local LearnGo project.",
   "permissions": [
     "activeTab",

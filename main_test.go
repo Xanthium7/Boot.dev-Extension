@@ -5,22 +5,21 @@ import (
 	"testing"
 )
 
-func Test(t *testing.T) {
+func TestSplitEmail(t *testing.T) {
 	type testCase struct {
-		age                   int
-		exYearsUntilAdult     int
-		exYearsUntilDrinking  int
-		exYearsUntilCarRental int
+		email    string
+		username string
+		domain   string
 	}
 
 	runCases := []testCase{
-		{4, 14, 17, 21},
-		{18, 0, 3, 7},
-		{22, 0, 0, 3},
+		{"drogon@dragonstone.com", "drogon", "dragonstone.com"},
+		{"rhaenyra@targaryen.com", "rhaenyra", "targaryen.com"},
 	}
 
 	submitCases := append(runCases, []testCase{
-		{25, 0, 0, 0},
+		{"viserys@kingslanding.com", "viserys", "kingslanding.com"},
+		{"aegon@stormsend.com", "aegon", "stormsend.com"},
 	}...)
 
 	testCases := runCases
@@ -28,31 +27,28 @@ func Test(t *testing.T) {
 		testCases = submitCases
 	}
 
-	skipped := len(submitCases) - len(testCases)
-
 	passCount := 0
 	failCount := 0
+	skipped := len(submitCases) - len(testCases)
 
 	for _, test := range testCases {
-		yearsUntilAdult, yearsUntilDrinking, yearsUntilCarRental := yearsUntilEvents(test.age)
-		if yearsUntilAdult != test.exYearsUntilAdult ||
-			yearsUntilDrinking != test.exYearsUntilDrinking ||
-			yearsUntilCarRental != test.exYearsUntilCarRental {
+		username, domain := splitEmail(test.email)
+		if username != test.username || domain != test.domain {
 			failCount++
 			t.Errorf(`---------------------------------
 Inputs:     (%v)
-Expecting:  (%v, %v, %v)
-Actual:     (%v, %v, %v)
+Expecting:  (%v, %v)
+Actual:     (%v, %v)
 Fail
-`, test.age, test.exYearsUntilAdult, test.exYearsUntilDrinking, test.exYearsUntilCarRental, yearsUntilAdult, yearsUntilDrinking, yearsUntilCarRental)
+`, test.email, test.username, test.domain, username, domain)
 		} else {
 			passCount++
 			fmt.Printf(`---------------------------------
 Inputs:     (%v)
-Expecting:  (%v, %v, %v)
-Actual:     (%v, %v, %v)
+Expecting:  (%v, %v)
+Actual:     (%v, %v)
 Pass
-`, test.age, test.exYearsUntilAdult, test.exYearsUntilDrinking, test.exYearsUntilCarRental, yearsUntilAdult, yearsUntilDrinking, yearsUntilCarRental)
+`, test.email, test.username, test.domain, username, domain)
 		}
 	}
 

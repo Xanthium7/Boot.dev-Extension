@@ -1,63 +1,171 @@
 const BTN_ID = 'bootdev-learngo-sync-btn';
 const TOAST_ID = 'bootdev-learngo-toast';
 
-function getEditorCode() {
-    const editor = document.querySelector('.cm-editor');
-    if (!editor) return null;
+function mergeLineBatches(existingLines, newLines) {
+    if (!existingLines || existingLines.length === 0) return newLines.slice();
+    if (!newLines || newLines.length === 0) return existingLines.slice();
 
-    try {
-        if (editor.cmView && editor.cmView.view && editor.cmView.view.state) {
-            return editor.cmView.view.state.doc.toString();
+    const maxOverlap = Math.min(existingLines.length, newLines.length);
+    for (let overlap = maxOverlap; overlap >= 1; overlap--) {
+        let match = true;
+        for (let i = 0; i < overlap; i++) {
+            if (existingLines[existingLines.length - overlap + i] !== newLines[i]) {
+                match = false;
+                break;
+            }
         }
-    } catch (e) {}
-
-    const lines = editor.querySelectorAll('.cm-line');
-    if (lines && lines.length > 0) {
-        return Array.from(lines).map(l => l.textContent).join('\n');
+        if (match) {
+            return existingLines.concat(newLines.slice(overlap));
+        }
     }
 
-    const content = editor.querySelector('.cm-content');
-    return content ? (content.innerText || content.textContent || '') : '';
+    return existingLines.concat(newLines);
+}
+
+async function getEditorCode() {
+    const editors = Array.from(document.querySelectorAll('.cm-editor'));
+    if (editors.length === 0) return null;
+
+    let editor = editors[0];
+    if (editors.length > 1) {
+        const visible = editors.find(ed => {
+            const rect = ed.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && window.getComputedStyle(ed).display !== 'none';
+        });
+        if (visible) editor = visible;
+    }
+
+    const scroller = editor.querySelector('.cm-scroller');
+
+    // Case 1: No scrollbar needed or entire document fits in visible height
+    if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 15) {
+        const lines = editor.querySelectorAll('.cm-line');
+        if (lines && lines.length > 0) {
+            return Array.from(lines).map(l => l.textContent).join('\n');
+        }
+        const content = editor.querySelector('.cm-content');
+        return content ? (content.innerText || content.textContent || '') : '';
+    }
+
+    // Case 2: Document is virtualized (longer than screen) - Perform an automated fast scroll sweep
+    const initialScrollTop = scroller.scrollTop;
+    let collectedLines = [];
+
+    // Scroll to top first
+    scroller.scrollTop = 0;
+    scroller.dispatchEvent(new Event('scroll'));
+    await new Promise(r => setTimeout(r, 60));
+
+    let visibleLines = Array.from(editor.querySelectorAll('.cm-line')).map(l => l.textContent);
+    collectedLines = mergeLineBatches(collectedLines, visibleLines);
+
+    // Step down through the document in chunks of 70% viewport height
+    const step = Math.max(120, Math.floor(scroller.clientHeight * 0.7));
+    const totalHeight = scroller.scrollHeight;
+    let currentScroll = 0;
+
+    while (currentScroll < totalHeight) {
+        currentScroll += step;
+        scroller.scrollTop = currentScroll;
+        scroller.dispatchEvent(new Event('scroll'));
+        await new Promise(r => setTimeout(r, 45));
+
+        const batch = Array.from(editor.querySelectorAll('.cm-line')).map(l => l.textContent);
+        collectedLines = mergeLineBatches(collectedLines, batch);
+
+        if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 5) {
+            // Reached the very bottom
+            break;
+        }
+    }
+
+    // Scroll to the absolute bottom to ensure any trailing lines are captured
+    scroller.scrollTop = scroller.scrollHeight;
+    scroller.dispatchEvent(new Event('scroll'));
+    await new Promise(r => setTimeout(r, 45));
+
+    const finalBatch = Array.from(editor.querySelectorAll('.cm-line')).map(l => l.textContent);
+    collectedLines = mergeLineBatches(collectedLines, finalBatch);
+
+    // Restore original scroll position
+    scroller.scrollTop = initialScrollTop;
+    scroller.dispatchEvent(new Event('scroll'));
+
+    return collectedLines.join('\n');
+}
+
+function clickElement(el) {
+    if (!el) return;
+    const opts = { bubbles: true, cancelable: true, view: window };
+    try {
+        el.dispatchEvent(new PointerEvent('pointerdown', opts));
+        el.dispatchEvent(new MouseEvent('mousedown', opts));
+        el.dispatchEvent(new PointerEvent('pointerup', opts));
+        el.dispatchEvent(new MouseEvent('mouseup', opts));
+        el.dispatchEvent(new MouseEvent('click', opts));
+    } catch (e) {}
+    if (typeof el.click === 'function') {
+        try {
+            el.click();
+        } catch (e) {}
+    }
 }
 
 function findGoTabs() {
     const tabs = [];
-    const seenEls = new Set();
+    const seen = new Set();
 
-    // Strategy 1: Find text nodes ending with .go and get their clickable ancestor
-    try {
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        let node;
-        while ((node = walker.nextNode())) {
-            const val = (node.nodeValue || '').trim();
-            if (val === 'main.go' || val === 'main_test.go' || (val.endsWith('.go') && val.length < 35 && !val.includes('/'))) {
-                const clickable = node.parentElement.closest('button, [role="tab"], div[class*="cursor-pointer"], a') || node.parentElement;
-                if (clickable && !seenEls.has(clickable)) {
-                    seenEls.add(clickable);
-                    tabs.push({ name: val, el: clickable });
-                }
+    const tabEls = Array.from(document.querySelectorAll('button[role="tab"], [role="tab"], button, div[role="tab"]'))
+        .filter(el => {
+            const text = (el.textContent || '').trim();
+            return text.includes('.go');
+        });
+
+    for (const el of tabEls) {
+        const btn = el.closest('button, [role="tab"]') || el;
+        if (!seen.has(btn)) {
+            const rawText = btn.textContent.trim();
+            const match = rawText.match(/[\w_.-]+\.go/);
+            if (match) {
+                seen.add(btn);
+                tabs.push({ name: match[0], el: btn });
             }
         }
-    } catch (e) {
-        console.warn('[Sync-Content] TreeWalker error:', e);
     }
 
-    // Strategy 2: Fallback to role="tab" elements
     if (tabs.length === 0) {
-        const roleTabs = Array.from(document.querySelectorAll('button[role="tab"], [role="tab"]'))
-            .filter(b => (b.textContent || '').includes('.go'));
-        for (const t of roleTabs) {
-            const rawText = t.textContent.trim();
-            const match = rawText.match(/[\w_.-]+\.go/);
-            const filename = match ? match[0] : rawText;
-            if (!seenEls.has(t)) {
-                seenEls.add(t);
-                tabs.push({ name: filename, el: t });
+        try {
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+                const val = (node.nodeValue || '').trim();
+                const match = val.match(/[\w_.-]+\.go/);
+                if (match && val.length < 35 && !val.includes('/')) {
+                    const clickable = node.parentElement.closest('button, [role="tab"], div[class*="cursor-pointer"], a') || node.parentElement;
+                    if (clickable && !seen.has(clickable)) {
+                        seen.add(clickable);
+                        tabs.push({ name: match[0], el: clickable });
+                    }
+                }
             }
-        }
+        } catch (e) {}
     }
 
     return tabs;
+}
+
+async function waitForEditorChange(oldCode, maxWaitMs = 800) {
+    const start = Date.now();
+    await new Promise(r => setTimeout(r, 200));
+
+    while (Date.now() - start < maxWaitMs) {
+        const currentCode = await getEditorCode();
+        if (currentCode && currentCode !== oldCode) {
+            return currentCode;
+        }
+        await new Promise(r => setTimeout(r, 60));
+    }
+    return await getEditorCode();
 }
 
 async function extractAllFiles() {
@@ -65,47 +173,52 @@ async function extractAllFiles() {
     const files = {};
 
     if (tabs.length === 0) {
-        // Single file exercise
-        const code = getEditorCode();
+        const code = await getEditorCode();
         if (code !== null && code !== undefined) {
             files['main.go'] = code;
         }
         return files;
     }
 
-    // Multiple file exercise with tabs
-    const activeTab = tabs.find(t =>
+    const initialActiveTab = tabs.find(t =>
         t.el.getAttribute('aria-selected') === 'true' ||
         t.el.classList.contains('active') ||
         t.el.classList.contains('bg-gray-800') ||
         t.el.classList.contains('text-white')
     ) || tabs[0];
 
+    // Read active tab
+    const initialCode = await getEditorCode();
+    if (initialCode) {
+        files[initialActiveTab.name] = initialCode;
+    }
+
+    let lastKnownCode = initialCode;
+
+    // Read other tabs
     for (const tab of tabs) {
-        try {
-            tab.el.click();
-        } catch (e) {}
+        if (tab === initialActiveTab && files[tab.name]) {
+            continue;
+        }
 
-        await new Promise(r => setTimeout(r, 120));
-
-        const code = getEditorCode();
-        if (code !== null && code !== undefined) {
-            files[tab.name] = code;
+        clickElement(tab.el);
+        const newCode = await waitForEditorChange(lastKnownCode, 900);
+        if (newCode !== null && newCode !== undefined) {
+            files[tab.name] = newCode;
+            lastKnownCode = newCode;
         }
     }
 
     // Restore active tab
-    if (activeTab && activeTab.el) {
-        try {
-            activeTab.el.click();
-        } catch (e) {}
+    if (initialActiveTab && initialActiveTab.el) {
+        clickElement(initialActiveTab.el);
+        await new Promise(r => setTimeout(r, 200));
     }
 
     return files;
 }
 
 function safeCopyToClipboard(text) {
-    // Hidden textarea fallback that works regardless of window focus
     try {
         const textarea = document.createElement('textarea');
         textarea.value = text;
@@ -120,7 +233,6 @@ function safeCopyToClipboard(text) {
         if (success) return true;
     } catch (e) {}
 
-    // Modern async clipboard API as secondary fallback
     try {
         if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(text).catch(() => {});
@@ -196,7 +308,6 @@ async function triggerSync() {
         btn.style.pointerEvents = 'none';
     }
 
-    // Safety watchdog: reset button if anything hangs over 5s
     const watchdog = setTimeout(() => {
         if (btn) {
             btn.innerHTML = originalText;
@@ -204,7 +315,7 @@ async function triggerSync() {
             btn.style.pointerEvents = 'auto';
             btn.style.background = 'linear-gradient(135deg, #d97706, #f59e0b)';
         }
-    }, 5000);
+    }, 8000);
 
     try {
         const files = await extractAllFiles();
@@ -223,12 +334,11 @@ async function triggerSync() {
             files: files
         };
 
-        // Delegate network request to background worker (bypasses CSP & Mixed Content)
         let syncSuccess = false;
         try {
             const bgResponse = await Promise.race([
                 chrome.runtime.sendMessage({ action: 'sendSync', payload }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Background timeout')), 3500))
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Background timeout')), 4000))
             ]);
 
             if (bgResponse && bgResponse.ok) {
@@ -238,17 +348,18 @@ async function triggerSync() {
             console.warn('[Sync-Content] Background sync failed, falling back:', e);
         }
 
+        const lineSummary = Object.entries(files).map(([name, code]) => `${name} (${code.split('\n').length} lines)`).join(', ');
+
         if (syncSuccess) {
-            showToast(`✓ Synced ${fileCount} file(s) (${fileNames.join(', ')}) to LearnGo & ran tests!`, 'success');
+            showToast(`✓ Synced: ${lineSummary}`, 'success');
             if (btn) {
                 btn.innerHTML = `<span>✓ Synced!</span>`;
                 btn.style.background = 'linear-gradient(135deg, #059669, #10b981)';
             }
             return { ok: true, count: fileCount };
         } else {
-            // Fallback: Copy JSON payload to clipboard for manual .\\sync.ps1 run
             safeCopyToClipboard(JSON.stringify(payload, null, 2));
-            showToast(`📋 Copied ${fileCount} file(s) to clipboard! Run .\\sync.ps1 in terminal`, 'info');
+            showToast(`📋 Copied: ${lineSummary} to clipboard!`, 'info');
             if (btn) {
                 btn.innerHTML = `<span>📋 Copied to Clipboard</span>`;
                 btn.style.background = 'linear-gradient(135deg, #2563eb, #3b82f6)';
@@ -343,7 +454,6 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
-// Listen for messages from extension popup
 chrome.runtime?.onMessage?.addListener((request, sender, sendResponse) => {
     if (request.action === 'sync') {
         triggerSync().then((result) => sendResponse(result || { ok: true }));
