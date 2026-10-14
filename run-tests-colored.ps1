@@ -23,12 +23,13 @@ foreach ($line in $lines) {
 
 try {
     if ($exitCode -eq 0) {
-        [Console]::Beep(880, 70)
-        [Console]::Beep(1175, 70)
-        [Console]::Beep(1568, 180)
+        # Rapid ascending major triad chime: C6 → E6 → G6
+        [Console]::Beep(1047, 80)
+        [Console]::Beep(1319, 80)
+        [Console]::Beep(1568, 120)
     } else {
-        [Console]::Beep(220, 350)
-        [Console]::Beep(160, 500)
+        # Quick subtle low blip
+        [Console]::Beep(220, 150)
     }
 } catch {
     # Some terminals do not support Console.Beep.

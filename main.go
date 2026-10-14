@@ -1,9 +1,9 @@
 package main
 
 func splitEmail(email string) (string, string) {
-	{
-		username, domain := "", ""
-	}
+	
+	username, domain := "", ""
+	
 	for i, r := range email {
 		if r == '@' {
 			username = email[:i]
