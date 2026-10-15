@@ -1,15 +1,17 @@
 package main
 
-func splitEmail(email string) (string, string) {
-	
-	username, domain := "", ""
-	
-	for i, r := range email {
-		if r == '@' {
-			username = email[:i]
-			domain = email[i+1:]
-			break
-		}
-	}
-	return username, domain
+type messageToSend struct {
+	message   string
+	sender    user
+	recipient user
+}
+
+type user struct {
+	name   string
+	number int
+}
+
+func canSendMessage(mToSend messageToSend) bool {
+	// ?
+	return true
 }

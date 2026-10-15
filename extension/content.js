@@ -1,28 +1,54 @@
 const BTN_ID = 'bootdev-learngo-sync-btn';
 const TOAST_ID = 'bootdev-learngo-toast';
 
-function mergeLineBatches(existingLines, newLines) {
-    if (!existingLines || existingLines.length === 0) return newLines.slice();
-    if (!newLines || newLines.length === 0) return existingLines.slice();
+// Ask the background script to run directly in the page's MAIN world via chrome.scripting
+async function getCodeFromMainWorld(timeoutMs = 300) {
+    try {
+        const bgPromise = new Promise((resolve) => {
+            if (!chrome.runtime?.sendMessage) return resolve(null);
+            chrome.runtime.sendMessage({ action: 'getMainWorldCode' }, (response) => {
+                if (chrome.runtime.lastError) {
+                    resolve(null);
+                } else {
+                    resolve(response?.code || null);
+                }
+            });
+        });
 
-    const maxOverlap = Math.min(existingLines.length, newLines.length);
-    for (let overlap = maxOverlap; overlap >= 1; overlap--) {
-        let match = true;
-        for (let i = 0; i < overlap; i++) {
-            if (existingLines[existingLines.length - overlap + i] !== newLines[i]) {
-                match = false;
-                break;
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs));
+        const res = await Promise.race([bgPromise, timeoutPromise]);
+        if (typeof res === 'string' && res.length > 0) {
+            return res;
+        }
+    } catch (e) {}
+
+    // Fallback: CustomEvent communication with content-main.js
+    return new Promise((resolve) => {
+        const reqId = Math.random().toString(36).slice(2);
+        let resolved = false;
+
+        const handler = (e) => {
+            if (e.detail?.reqId === reqId) {
+                window.removeEventListener('BOOTDEV_SYNC_RESPONSE', handler);
+                resolved = true;
+                resolve(e.detail.code);
             }
-        }
-        if (match) {
-            return existingLines.concat(newLines.slice(overlap));
-        }
-    }
+        };
 
-    return existingLines.concat(newLines);
+        window.addEventListener('BOOTDEV_SYNC_RESPONSE', handler);
+        window.dispatchEvent(new CustomEvent('BOOTDEV_SYNC_REQUEST', { detail: { reqId } }));
+
+        setTimeout(() => {
+            if (!resolved) {
+                window.removeEventListener('BOOTDEV_SYNC_RESPONSE', handler);
+                resolve(null);
+            }
+        }, 120);
+    });
 }
 
-async function getEditorCode() {
+// Fallback: pixel-accurate vertical matching between gutter line numbers and visible lines
+async function getEditorCodeDOM() {
     const editors = Array.from(document.querySelectorAll('.cm-editor'));
     if (editors.length === 0) return null;
 
@@ -37,7 +63,7 @@ async function getEditorCode() {
 
     const scroller = editor.querySelector('.cm-scroller');
 
-    // Case 1: No scrollbar needed or entire document fits in visible height
+    // Case 1: Entire document fits in visible height
     if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 15) {
         const lines = editor.querySelectorAll('.cm-line');
         if (lines && lines.length > 0) {
@@ -47,20 +73,87 @@ async function getEditorCode() {
         return content ? (content.innerText || content.textContent || '') : '';
     }
 
-    // Case 2: Document is virtualized (longer than screen) - Perform an automated fast scroll sweep
+    // Case 2: Document is virtualized — use line numbers physically aligned with .cm-line elements
     const initialScrollTop = scroller.scrollTop;
-    let collectedLines = [];
+    const lineMap = new Map(); // lineNumber (int) -> string text
+    const maxPossibleLine = Math.ceil(scroller.scrollHeight / 14) + 15;
+
+    function captureVisibleLines() {
+        // Collect visible, non-hidden numbered gutter elements
+        const gutterEls = Array.from(editor.querySelectorAll('.cm-lineNumbers .cm-gutterElement'));
+        const rawGutters = [];
+
+        for (const el of gutterEls) {
+            // Must have physical height and not be hidden (skips CodeMirror measurement dummy elements)
+            if (el.offsetHeight <= 0) continue;
+            const style = window.getComputedStyle(el);
+            if (style.visibility === 'hidden' || style.display === 'none') continue;
+
+            const text = el.textContent.trim();
+            const num = parseInt(text, 10);
+            if (isNaN(num) || num <= 0 || String(num) !== text) continue;
+
+            // Must not exceed physical document height capacity
+            if (num > maxPossibleLine) continue;
+
+            rawGutters.push({
+                num: num,
+                top: el.getBoundingClientRect().top
+            });
+        }
+
+        if (rawGutters.length === 0) return;
+
+        // Sort vertically top-to-bottom
+        rawGutters.sort((a, b) => a.top - b.top);
+
+        // Filter out any anomalous line jumps
+        const numberedGutters = [];
+        for (const g of rawGutters) {
+            if (numberedGutters.length > 0) {
+                const prev = numberedGutters[numberedGutters.length - 1];
+                if (g.num <= prev.num || g.num > prev.num + 3) continue;
+            }
+            numberedGutters.push(g);
+        }
+
+        if (numberedGutters.length === 0) return;
+
+        // Collect all visible .cm-line elements
+        const lineEls = Array.from(editor.querySelectorAll('.cm-line')).map(el => ({
+            text: el.textContent,
+            top: el.getBoundingClientRect().top
+        }));
+
+        if (lineEls.length === 0) return;
+
+        // Match each gutter line number to the physically aligned .cm-line (within 8px tolerance)
+        for (const g of numberedGutters) {
+            let bestLine = null;
+            let minDiff = 8;
+
+            for (const l of lineEls) {
+                const diff = Math.abs(g.top - l.top);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    bestLine = l;
+                }
+            }
+
+            if (bestLine) {
+                lineMap.set(g.num, bestLine.text);
+            }
+        }
+    }
 
     // Scroll to top first
     scroller.scrollTop = 0;
     scroller.dispatchEvent(new Event('scroll'));
-    await new Promise(r => setTimeout(r, 60));
+    await new Promise(r => setTimeout(r, 100));
+    captureVisibleLines();
 
-    let visibleLines = Array.from(editor.querySelectorAll('.cm-line')).map(l => l.textContent);
-    collectedLines = mergeLineBatches(collectedLines, visibleLines);
-
-    // Step down through the document in chunks of 70% viewport height
-    const step = Math.max(120, Math.floor(scroller.clientHeight * 0.7));
+    // Small scroll steps (~40% of viewport height) to guarantee continuous overlap
+    const step = Math.max(100, Math.floor(scroller.clientHeight * 0.45));
     const totalHeight = scroller.scrollHeight;
     let currentScroll = 0;
 
@@ -68,30 +161,49 @@ async function getEditorCode() {
         currentScroll += step;
         scroller.scrollTop = currentScroll;
         scroller.dispatchEvent(new Event('scroll'));
-        await new Promise(r => setTimeout(r, 45));
+        await new Promise(r => setTimeout(r, 70));
+        captureVisibleLines();
 
-        const batch = Array.from(editor.querySelectorAll('.cm-line')).map(l => l.textContent);
-        collectedLines = mergeLineBatches(collectedLines, batch);
-
-        if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 5) {
-            // Reached the very bottom
+        if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
             break;
         }
     }
 
-    // Scroll to the absolute bottom to ensure any trailing lines are captured
+    // Scroll to absolute bottom
     scroller.scrollTop = scroller.scrollHeight;
     scroller.dispatchEvent(new Event('scroll'));
-    await new Promise(r => setTimeout(r, 45));
-
-    const finalBatch = Array.from(editor.querySelectorAll('.cm-line')).map(l => l.textContent);
-    collectedLines = mergeLineBatches(collectedLines, finalBatch);
+    await new Promise(r => setTimeout(r, 90));
+    captureVisibleLines();
 
     // Restore original scroll position
     scroller.scrollTop = initialScrollTop;
     scroller.dispatchEvent(new Event('scroll'));
 
-    return collectedLines.join('\n');
+    if (lineMap.size === 0) return '';
+    const maxLine = Math.max(...lineMap.keys());
+    const result = [];
+    for (let i = 1; i <= maxLine; i++) {
+        result.push(lineMap.get(i) ?? '');
+    }
+
+    // Trim trailing blank lines
+    while (result.length > 0 && result[result.length - 1].trim() === '') {
+        result.pop();
+    }
+
+    return result.join('\n');
+}
+
+// Main getEditorCode function: tries in-memory first, falls back to DOM
+async function getEditorCode() {
+    try {
+        const memoryCode = await getCodeFromMainWorld(250);
+        if (typeof memoryCode === 'string' && memoryCode.length > 0) {
+            return memoryCode;
+        }
+    } catch (e) {}
+
+    return await getEditorCodeDOM();
 }
 
 function clickElement(el) {
@@ -154,20 +266,6 @@ function findGoTabs() {
     return tabs;
 }
 
-async function waitForEditorChange(oldCode, maxWaitMs = 800) {
-    const start = Date.now();
-    await new Promise(r => setTimeout(r, 200));
-
-    while (Date.now() - start < maxWaitMs) {
-        const currentCode = await getEditorCode();
-        if (currentCode && currentCode !== oldCode) {
-            return currentCode;
-        }
-        await new Promise(r => setTimeout(r, 60));
-    }
-    return await getEditorCode();
-}
-
 async function extractAllFiles() {
     const tabs = findGoTabs();
     const files = {};
@@ -193,8 +291,6 @@ async function extractAllFiles() {
         files[initialActiveTab.name] = initialCode;
     }
 
-    let lastKnownCode = initialCode;
-
     // Read other tabs
     for (const tab of tabs) {
         if (tab === initialActiveTab && files[tab.name]) {
@@ -202,10 +298,18 @@ async function extractAllFiles() {
         }
 
         clickElement(tab.el);
-        const newCode = await waitForEditorChange(lastKnownCode, 900);
+        // Wait for tab click to trigger and CodeMirror to swap document
+        await new Promise(r => setTimeout(r, 300));
+
+        let newCode = await getEditorCode();
+        // If code hasn't changed from the initial tab yet, give it another brief wait
+        if (newCode === files[initialActiveTab.name]) {
+            await new Promise(r => setTimeout(r, 200));
+            newCode = await getEditorCode();
+        }
+
         if (newCode !== null && newCode !== undefined) {
             files[tab.name] = newCode;
-            lastKnownCode = newCode;
         }
     }
 

@@ -5,21 +5,41 @@ import (
 	"testing"
 )
 
-func TestSplitEmail(t *testing.T) {
+func Test(t *testing.T) {
 	type testCase struct {
-		email    string
-		username string
-		domain   string
+		mToSend  messageToSend
+		expected bool
 	}
 
 	runCases := []testCase{
-		{"drogon@dragonstone.com", "drogon", "dragonstone.com"},
-		{"rhaenyra@targaryen.com", "rhaenyra", "targaryen.com"},
+		{messageToSend{
+			message:   "you have an appointment tomorrow",
+			sender:    user{name: "Brenda Halafax", number: 16545550987},
+			recipient: user{name: "Sally Sue", number: 19035558973},
+		}, true},
+		{messageToSend{
+			message:   "you have an event tomorrow",
+			sender:    user{number: 16545550987},
+			recipient: user{name: "Suzie Sall", number: 19035558973},
+		}, false},
 	}
 
 	submitCases := append(runCases, []testCase{
-		{"viserys@kingslanding.com", "viserys", "kingslanding.com"},
-		{"aegon@stormsend.com", "aegon", "stormsend.com"},
+		{messageToSend{
+			message:   "you have an birthday tomorrow",
+			sender:    user{name: "Jason Bjorn", number: 16545550987},
+			recipient: user{name: "Jim Bond"},
+		}, false},
+		{messageToSend{
+			message:   "you have a party tomorrow",
+			sender:    user{name: "Njorn Halafax"},
+			recipient: user{name: "Becky Sue", number: 19035558973},
+		}, false},
+		{messageToSend{
+			message:   "you have a birthday tomorrow",
+			sender:    user{name: "Eli Halafax", number: 16545550987},
+			recipient: user{number: 19035558973},
+		}, false},
 	}...)
 
 	testCases := runCases
@@ -27,28 +47,52 @@ func TestSplitEmail(t *testing.T) {
 		testCases = submitCases
 	}
 
+	skipped := len(submitCases) - len(testCases)
 	passCount := 0
 	failCount := 0
-	skipped := len(submitCases) - len(testCases)
 
 	for _, test := range testCases {
-		username, domain := splitEmail(test.email)
-		if username != test.username || domain != test.domain {
+		output := canSendMessage(test.mToSend)
+		if output != test.expected {
 			failCount++
 			t.Errorf(`---------------------------------
-Inputs:     (%v)
-Expecting:  (%v, %v)
-Actual:     (%v, %v)
+Inputs:
+  * message:          %s
+  * sender.name:      %s
+  * sender.number:    %d
+  * recipient.name:   %s
+  * recipient.number: %d
+  Expected:           %v
+  Actual:             %v
 Fail
-`, test.email, test.username, test.domain, username, domain)
+`,
+				test.mToSend.message,
+				test.mToSend.sender.name,
+				test.mToSend.sender.number,
+				test.mToSend.recipient.name,
+				test.mToSend.recipient.number,
+				test.expected,
+				output)
 		} else {
 			passCount++
 			fmt.Printf(`---------------------------------
-Inputs:     (%v)
-Expecting:  (%v, %v)
-Actual:     (%v, %v)
+Inputs:
+  * message:          %s
+  * sender.name:      %s
+  * sender.number:    %d
+  * recipient.name:   %s
+  * recipient.number: %d
+  Expected:           %v
+  Actual:             %v
 Pass
-`, test.email, test.username, test.domain, username, domain)
+`,
+				test.mToSend.message,
+				test.mToSend.sender.name,
+				test.mToSend.sender.number,
+				test.mToSend.recipient.name,
+				test.mToSend.recipient.number,
+				test.expected,
+				output)
 		}
 	}
 

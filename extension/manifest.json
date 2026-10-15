@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Boot.dev -> LearnGo Sync",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "One-click export of main.go and main_test.go from Boot.dev into your local LearnGo project.",
   "permissions": [
     "activeTab",
@@ -23,8 +23,20 @@
   "content_scripts": [
     {
       "matches": ["https://www.boot.dev/*"],
+      "js": ["content-main.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.boot.dev/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content-main.js"],
+      "matches": ["https://www.boot.dev/*"]
     }
   ]
 }
