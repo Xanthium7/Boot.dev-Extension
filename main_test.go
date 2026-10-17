@@ -2,63 +2,61 @@ package main
 
 import (
 	"fmt"
-	"reflect"
+	"strconv"
 	"testing"
 )
 
-func Test(t *testing.T) {
+func TestSendMessage(t *testing.T) {
 	type testCase struct {
-		name     string
-		expected uintptr
+		format   formatter
+		expected string
 	}
 
 	runCases := []testCase{
-		{"contact", uintptr(24)},
-		{"perms", uintptr(16)},
+		{plainText{message: "Hello, World!"}, "Hello, World!"},
+		{bold{message: "Bold Message"}, "**Bold Message**"},
+		{code{message: "Code Message"}, "`Code Message`"},
 	}
 
-	submitCases := append(runCases, []testCase{}...)
+	submitCases := append(runCases, []testCase{
+		{code{message: ""}, "``"},
+		{bold{message: ""}, "****"},
+		{plainText{message: ""}, ""},
+	}...)
 
-	skipped := len(submitCases) - len(runCases)
+	testCases := runCases
+	if withSubmit {
+		testCases = submitCases
+	}
+	skipped := len(submitCases) - len(testCases)
+
 	passCount := 0
 	failCount := 0
 
-	for _, test := range submitCases {
-		var typ reflect.Type
-		if test.name == "contact" {
-			typ = reflect.TypeOf(contact{
-				userID:       "",
-				sendingLimit: 0,
-				age:          0,
-			})
-		} else if test.name == "perms" {
-			typ = reflect.TypeOf(perms{
-				permissionLevel: 0,
-				canSend:         false,
-				canReceive:      false,
-				canManage:       false,
-			})
-		}
-
-		size := typ.Size()
-
-		if size != test.expected {
-			failCount++
-			t.Errorf(`---------------------------------
+	for i, test := range testCases {
+		testName := "Test Case " + strconv.Itoa(i+1)
+		t.Run(testName, func(t *testing.T) {
+			formattedMessage := sendMessage(test.format)
+			if formattedMessage != test.expected {
+				failCount++
+				t.Errorf(`---------------------------------
+%s
 Inputs:     (%v)
-Expecting:  %v bytes
-Actual:     %v bytes
+Expecting:  %v
+Actual:     %v
 Fail
-`, test.name, test.expected, size)
-		} else {
-			passCount++
-			fmt.Printf(`---------------------------------
+`, testName, test.format, test.expected, formattedMessage)
+			} else {
+				passCount++
+				fmt.Printf(`---------------------------------
+%s
 Inputs:     (%v)
-Expecting:  %v bytes
-Actual:     %v bytes
+Expecting:  %v
+Actual:     %v
 Pass
-`, test.name, test.expected, size)
-		}
+`, testName, test.format, test.expected, formattedMessage)
+			}
+		})
 	}
 
 	fmt.Println("---------------------------------")
