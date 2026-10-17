@@ -1,17 +1,14 @@
 package main
 
-type messageToSend struct {
-	message   string
-	sender    user
-	recipient user
+type contact struct {
+	sendingLimit int32
+	userID       string
+	age          int32
 }
 
-type user struct {
-	name   string
-	number int
-}
-
-func canSendMessage(mToSend messageToSend) bool {
-	// ?
-	return true
+type perms struct {
+	canSend         bool
+	canReceive      bool
+	permissionLevel int
+	canManage       bool
 }

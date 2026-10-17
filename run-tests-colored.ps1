@@ -87,4 +87,4 @@ try {
     # Some systems do not support audio feedback.
 }
 
-exit $exitCode
+exit $exitCode

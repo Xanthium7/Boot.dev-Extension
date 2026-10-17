@@ -2,97 +2,62 @@ package main
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
 
 func Test(t *testing.T) {
 	type testCase struct {
-		mToSend  messageToSend
-		expected bool
+		name     string
+		expected uintptr
 	}
 
 	runCases := []testCase{
-		{messageToSend{
-			message:   "you have an appointment tomorrow",
-			sender:    user{name: "Brenda Halafax", number: 16545550987},
-			recipient: user{name: "Sally Sue", number: 19035558973},
-		}, true},
-		{messageToSend{
-			message:   "you have an event tomorrow",
-			sender:    user{number: 16545550987},
-			recipient: user{name: "Suzie Sall", number: 19035558973},
-		}, false},
+		{"contact", uintptr(24)},
+		{"perms", uintptr(16)},
 	}
 
-	submitCases := append(runCases, []testCase{
-		{messageToSend{
-			message:   "you have an birthday tomorrow",
-			sender:    user{name: "Jason Bjorn", number: 16545550987},
-			recipient: user{name: "Jim Bond"},
-		}, false},
-		{messageToSend{
-			message:   "you have a party tomorrow",
-			sender:    user{name: "Njorn Halafax"},
-			recipient: user{name: "Becky Sue", number: 19035558973},
-		}, false},
-		{messageToSend{
-			message:   "you have a birthday tomorrow",
-			sender:    user{name: "Eli Halafax", number: 16545550987},
-			recipient: user{number: 19035558973},
-		}, false},
-	}...)
+	submitCases := append(runCases, []testCase{}...)
 
-	testCases := runCases
-	if withSubmit {
-		testCases = submitCases
-	}
-
-	skipped := len(submitCases) - len(testCases)
+	skipped := len(submitCases) - len(runCases)
 	passCount := 0
 	failCount := 0
 
-	for _, test := range testCases {
-		output := canSendMessage(test.mToSend)
-		if output != test.expected {
+	for _, test := range submitCases {
+		var typ reflect.Type
+		if test.name == "contact" {
+			typ = reflect.TypeOf(contact{
+				userID:       "",
+				sendingLimit: 0,
+				age:          0,
+			})
+		} else if test.name == "perms" {
+			typ = reflect.TypeOf(perms{
+				permissionLevel: 0,
+				canSend:         false,
+				canReceive:      false,
+				canManage:       false,
+			})
+		}
+
+		size := typ.Size()
+
+		if size != test.expected {
 			failCount++
 			t.Errorf(`---------------------------------
-Inputs:
-  * message:          %s
-  * sender.name:      %s
-  * sender.number:    %d
-  * recipient.name:   %s
-  * recipient.number: %d
-  Expected:           %v
-  Actual:             %v
+Inputs:     (%v)
+Expecting:  %v bytes
+Actual:     %v bytes
 Fail
-`,
-				test.mToSend.message,
-				test.mToSend.sender.name,
-				test.mToSend.sender.number,
-				test.mToSend.recipient.name,
-				test.mToSend.recipient.number,
-				test.expected,
-				output)
+`, test.name, test.expected, size)
 		} else {
 			passCount++
 			fmt.Printf(`---------------------------------
-Inputs:
-  * message:          %s
-  * sender.name:      %s
-  * sender.number:    %d
-  * recipient.name:   %s
-  * recipient.number: %d
-  Expected:           %v
-  Actual:             %v
+Inputs:     (%v)
+Expecting:  %v bytes
+Actual:     %v bytes
 Pass
-`,
-				test.mToSend.message,
-				test.mToSend.sender.name,
-				test.mToSend.sender.number,
-				test.mToSend.recipient.name,
-				test.mToSend.recipient.number,
-				test.expected,
-				output)
+`, test.name, test.expected, size)
 		}
 	}
 
